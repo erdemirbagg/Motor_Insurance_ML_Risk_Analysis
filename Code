@@ -1,0 +1,203 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+
+warnings.filterwarnings('ignore')
+sns.set_style('whitegrid')
+%matplotlib inline
+
+# =====================
+# 1) DATA LOAD & EDA
+# =====================
+
+# Load data
+df = pd.read_csv('../freMTPL2freq.csv')
+
+# Basic info
+print(f"Dataset Shape: {df.shape}")
+display(df.head())
+display(df.info())
+
+# Check for duplicates
+print(f"Duplicates: {df.duplicated().sum()}")
+df = df.drop_duplicates()
+
+# Capping Exposure at 1.0 (some datasets have artifacts > 1.0)
+print(f"Policies with Exposure > 1: {len(df[df['Exposure'] > 1])}")
+df.loc[df['Exposure'] > 1, 'Exposure'] = 1.0
+
+# Sıfır veya negatif exposure varsa atmak güvenli
+df = df[df['Exposure'] > 0]
+
+# Create 'Frequency' column for visualization (Claim Count per Unit Exposure)
+df['Frequency'] = df['ClaimNb'] / df['Exposure']
+
+fig, ax = plt.subplots(1, 2, figsize=(14, 5))
+
+# Claim Count Distribution
+sns.countplot(data=df, x='ClaimNb', ax=ax[0], palette='viridis')
+ax[0].set_title('Distribution of Number of Claims')
+ax[0].set_yscale('log')  # Log scale because 0 claims is dominant
+
+# Exposure Distribution
+sns.histplot(data=df, x='Exposure', bins=30, ax=ax[1], color='skyblue')
+ax[1].set_title('Distribution of Exposure')
+
+plt.tight_layout()
+plt.show()
+
+
+def plot_frequency_by_feature(feature, df, kind='bar'):
+    # weighted means: sum(claims) / sum(exposure)
+    grouped = df.groupby(feature).agg({'ClaimNb': 'sum', 'Exposure': 'sum'}).reset_index()
+    grouped['EmpiricalFreq'] = grouped['ClaimNb'] / grouped['Exposure']
+    
+    plt.figure(figsize=(10, 5))
+    if kind == 'bar':
+        sns.barplot(data=grouped, x=feature, y='EmpiricalFreq', palette='muted')
+        plt.xticks(rotation=45)
+    elif kind == 'line':
+        sns.lineplot(data=grouped, x=feature, y='EmpiricalFreq', marker='o')
+    
+    plt.title(f'Empirical Frequency by {feature}')
+    plt.ylabel('Claims per Exposure Unit')
+    plt.tight_layout()
+    plt.show()
+
+# Vehicle Age
+df['VehAgeBin'] = pd.cut(df['VehAge'], bins=[0, 1, 4, 10, 15, 20, 100], include_lowest=True)
+plot_frequency_by_feature('VehAgeBin', df)
+
+# Driver Age
+df['DrivAgeBin'] = pd.cut(df['DrivAge'], bins=[18, 21, 25, 30, 40, 50, 60, 70, 100], include_lowest=True)
+plot_frequency_by_feature('DrivAgeBin', df)
+
+# Bonus Malus
+df['BonusMalusBin'] = pd.cut(
+    df['BonusMalus'],
+    bins=[50, 60, 70, 80, 90, 100, 120, 150, 250, 400],
+    include_lowest=True
+)
+plot_frequency_by_feature('BonusMalusBin', df)
+
+
+# =====================
+# 2) MODEL SETUP
+# =====================
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import PoissonRegressor
+from sklearn.metrics import mean_poisson_deviance
+
+# Select Features
+categorical_features = ['Area', 'VehBrand', 'VehGas', 'Region']
+numerical_features = ['VehPower', 'VehAge', 'DrivAge', 'BonusMalus', 'Density']
+
+X = df[categorical_features + numerical_features]
+y = df['ClaimNb']
+exposure = df['Exposure']
+
+# Split
+X_train, X_test, y_train, y_test, exp_train, exp_test = train_test_split(
+    X, y, exposure, test_size=0.2, random_state=42
+)
+
+print(f"Train size: {X_train.shape[0]}, Test size: {X_test.shape[0]}")
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', OneHotEncoder(drop='first', sparse=False), categorical_features),
+        ('num', 'passthrough', numerical_features)
+    ]
+)
+
+# =====================
+# 3) GLM (Poisson) – FREQUENCY MODEL
+# =====================
+
+glm_pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('regressor', PoissonRegressor(alpha=1e-3, max_iter=300))
+])
+
+# Frequency target
+y_train_freq = y_train / exp_train
+
+print("Training GLM on Frequency...")
+glm_pipeline.fit(X_train, y_train_freq, regressor__sample_weight=exp_train)
+print("GLM Trained.")
+
+
+# =====================
+# 4) XGBoost – FREQUENCY MODEL
+# =====================
+
+import xgboost as xgb
+
+xgb_pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('regressor', xgb.XGBRegressor(
+        objective='count:poisson',
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=5,
+        n_jobs=-1
+    ))
+])
+
+print("Training XGBoost on Frequency...")
+xgb_pipeline.fit(X_train, y_train_freq, regressor__sample_weight=exp_train)
+print("XGBoost Trained.")
+
+
+# =====================
+# 5) MODEL EVALUATION (DEVIANCE)
+# =====================
+
+def calculate_deviance(model, X, y_counts, exposures):
+    # model frequency öngörüyor
+    freq_pred = model.predict(X)
+    counts_pred = freq_pred * exposures
+    return mean_poisson_deviance(y_counts, counts_pred)
+
+dev_glm = calculate_deviance(glm_pipeline, X_test, y_test, exp_test)
+dev_xgb = calculate_deviance(xgb_pipeline, X_test, y_test, exp_test)
+
+print(f"Poisson Deviance - GLM: {dev_glm:.4f}")
+print(f"Poisson Deviance - XGB: {dev_xgb:.4f}")
+
+
+# =====================
+# 6) XGBoost FEATURE IMPORTANCE (Permutation)
+# =====================
+
+from sklearn.inspection import permutation_importance
+
+print("Calculating Permutation Importance (this may take a minute)...")
+
+y_test_freq = y_test / exp_test
+
+result = permutation_importance(
+    xgb_pipeline,
+    X_test.iloc[:5000],
+    y_test_freq.iloc[:5000],  # frequency target
+    n_repeats=5,
+    random_state=42,
+    sample_weight=exp_test.iloc[:5000],
+    scoring='neg_mean_poisson_deviance'
+)
+
+sorted_idx = result.importances_mean.argsort()
+all_features = np.array(categorical_features + numerical_features)
+
+plt.figure(figsize=(10, 6))
+plt.barh(all_features[sorted_idx], result.importances_mean[sorted_idx])
+plt.title("XGBoost Feature Importance (Permutation)")
+plt.xlabel("Importance (Impact on Deviance)")
+plt.tight_layout()
+plt.show()
