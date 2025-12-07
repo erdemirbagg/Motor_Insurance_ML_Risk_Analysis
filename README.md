@@ -12,7 +12,7 @@ The goal is to demonstrate cloud-based insurance analytics for an insurtech / da
 
 ## Data
 
-- Source: Kaggle – *French Motor Claims Datasets (freMTPL2freq) : https://www.kaggle.com/datasets/floser/french-motor-claims-datasets-fremtpl2freq
+- Source: Kaggle – *French Motor Claims Datasets (freMTPL2freq)* : https://www.kaggle.com/datasets/floser/french-motor-claims-datasets-fremtpl2freq
 - Unit of observation: policy–year exposure
 - Key variables: `ClaimNb`, `Exposure`, `DrivAge`, `VehAge`, `BonusMalus`,
   `Area`, `Region`, `VehBrand`, `VehGas`, `Density`
