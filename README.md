@@ -76,3 +76,26 @@ The `Code` script contains an earlier local analysis of the same dataset in Pyth
 - Using **SQL** for portfolio / risk analysis
 - Training a basic **claim frequency model** in BigQuery ML
 - Building a **BI dashboard** in Looker Studio for insurance risk insights
+
+## Project structure
+
+- `Code/`
+  - `Code` – Python EDA and visualisation script for the `freMTPL2freq` dataset
+- `sql/`
+  - `01_portfolio_summary.sql` – basic portfolio summary (rows, policies, exposure, claims, overall claim frequency)
+  - `02_eda_claim_frequency.sql` – claim frequency by region, area and driver age bands
+  - `03_freq_with_split.sql` – adds per-policy claim frequency and a random TRAIN/TEST split
+  - `04_ml_train_claimfreq_reg.sql` – trains a BigQuery ML linear regression model
+  - `05_ml_evaluate_claimfreq_reg.sql` – evaluates model performance with `ML.EVALUATE`
+  - `06_ml_predictions_rowlevel.sql` – row-level predictions on the TEST split
+  - `07_ml_predictions_by_age_band.sql` – aggregates observed vs. predicted claim frequency by age band for Looker Studio charts
+
+## How to run
+
+1. Upload `freMTPL2freq.csv` into BigQuery as  
+   `\`<project-id>.motor_claims.freMTPL2freq\``.
+2. Execute the SQL files in numerical order (`01_...` → `07_...`).
+3. Connect Looker Studio to the tables
+   `freq_by_region`, `freq_by_age_band` and `predictions_by_age_band`
+   to reproduce the dashboards in the blog post.
+
