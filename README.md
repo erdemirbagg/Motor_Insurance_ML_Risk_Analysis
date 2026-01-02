@@ -55,6 +55,18 @@ I use rows with `Exposure > 0` and define the main target as:
 
 Screenshots of the dashboard live in the `img/` folder.
 
+## Looker Studio dashboard screenshots
+
+### Combo: actual vs predicted frequency by age band
+<img src="img/Bildschirmfoto%202025-12-08%20um%2011.18.27.png" width="900" />
+
+### Claim frequency by driver age band
+<img src="img/Bildschirmfoto%202025-12-07%20um%2013.43.03.png" width="900" />
+
+### Claim frequency & total exposure by region
+<img src="img/Bildschirmfoto%202025-12-07%20um%2013.43.08.png" width="900" />
+
+
 ## Python script
 
 The `Code` script contains an earlier local analysis of the same dataset in Python
